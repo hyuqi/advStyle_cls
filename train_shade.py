@@ -103,7 +103,7 @@ class Trainer:
         self.args = args
         self.device = device
         
-        model = resnet18(pretrained=True, classes=args.n_classes, SHM=args.SHM, concentration_coeff=args.concentration_coeff, base_style_num=args.base_style_num)
+        model = resnet18(pretrained=True, classes=args.n_classes)#, SHM=args.SHM, concentration_coeff=args.concentration_coeff, base_style_num=args.base_style_num)
 
         #teacher_model = resnet18(pretrained=True, classes=args.n_classes)
         #self.teacher_model = teacher_model.to(device)
@@ -139,20 +139,21 @@ class Trainer:
             data, jig_l, class_l, d_idx = data.to(self.device), jig_l.to(self.device), class_l.to(self.device), d_idx.to(self.device)
             self.optimizer.zero_grad()
             self.model.zero_grad()
+            data_flip = torch.flip(data,(3,)).detach().clone()
+            data = torch.cat((data,data_flip))
+            class_l = torch.cat((class_l,class_l))
             
+            self.optimizer.zero_grad()
             #--------------------------------------------------
             x = data
-            # print(self.args.SHM)
-            # print(x.shape)
             y = class_l
-            #print(y.data.shape)
             
             # Stage 1: Adversial feature style generation
 
             # miu and sigma across the channel for each image, (N,C,1,1)
             mu = torch.mean(x, (2,3), keepdim=True)
-            sig = torch.std(x, (2,3), keepdim=True)
-
+            var = torch.var(x, (2,3), keepdim=True)
+            sig = (var+1e-5).sqrt()
             # style feature, (N,C,1,1)
             style_feature_mu = mu.clone() # otherwise grad=0
             style_feature_sig = sig.clone() 
@@ -186,6 +187,19 @@ class Trainer:
             
             x_adv = ( x_norm + style_feature_mu ) * style_feature_sig
 
+            # further norm?
+            input_max = x_adv.clone().detach()
+            rgb_mean_std = ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            for t, m, s in zip(input_max, rgb_mean_std[0], rgb_mean_std[1]):
+                t.mul_(s).add_(m)
+            input_max.clamp_(0, 1)
+            input_max = T.Normalize(*rgb_mean_std)(input_max)
+            input_max = input_max.detach().clone()
+            
+            x_adv = input_max.clone().detach()
+            # 
+            
+
             # predict using classification model on original image and get loss
             score_x = model(x, class_l, not self.args.norsc, epoch)['logits']
             
@@ -201,7 +215,7 @@ class Trainer:
             
 
             # Train the classification model
-            self.optimizer.zero_grad()
+            #self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
             
