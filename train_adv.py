@@ -41,7 +41,7 @@ def get_args():
                         help="If set, it will limit the number of testing samples")
     parser.add_argument("--learning_rate", "-l", type=float, default=.01, help="Learning rate")
     parser.add_argument("--adv_lr", type=float, default=3.0, help="Learning rate for advstyle")
-    parser.add_argument("--epochs", "-e", type=int, default=25, help="Number of epochs")
+    parser.add_argument("--epochs", "-e", type=int, default=20, help="Number of epochs")
     parser.add_argument("--n_classes", "-c", type=int, default=7, help="Number of classes")
     parser.add_argument("--network", choices=model_factory.nets_map.keys(), help="Which network to use", default="resnet18")
     parser.add_argument("--tf_logger", type=bool, default=True, help="If true will save tensorboard compatible logs")
@@ -56,7 +56,7 @@ def get_args():
     parser.add_argument("--nesterov", action='store_true', default=False, help="Use nesterov")
     parser.add_argument('--norsc', action='store_true', default=False,
                         help='Do not use RSC, i.e., use EMR')
-    parser.add_argument('--seed', type=int, default=1,
+    parser.add_argument('--seed', type=int, default=0,
                         help='model seed')
     parser.add_argument('--print_freq', type=int, default=100,
                         help='print frequency')
@@ -105,8 +105,8 @@ class Trainer:
         
         model = resnet18(pretrained=True, classes=args.n_classes)#, SHM=args.SHM, concentration_coeff=args.concentration_coeff, base_style_num=args.base_style_num)
 
-        teacher_model = resnet18(pretrained=True, classes=args.n_classes)
-        self.teacher_model = teacher_model.to(device)
+        #teacher_model = resnet18(pretrained=True, classes=args.n_classes)
+        #self.teacher_model = teacher_model.to(device)
         
 
         self.model = model.to(device)
@@ -127,28 +127,7 @@ class Trainer:
             print(args.source)
         else:
             self.target_id = None
-
     
-    def style_consistency(self, x):
-        outputs_sm = F.softmax(x, dim=1) ##  2B,C first B is x, last B is x_new
-        im_prob, aug_prob = outputs_sm.chunk(2, dim=0) 
-        
-        p_mixture = torch.clamp((aug_prob + im_prob) / 2., 1e-7, 1).log()
-        consistency_loss = self.args.sc_weight * (
-                    F.kl_div(p_mixture, aug_prob, reduction='batchmean') +
-                    F.kl_div(p_mixture, im_prob, reduction='batchmean') 
-                    ) / 2.
-        return consistency_loss
-    
-    def retrospective_consistency(self, x, feats):
-        self.teacher_model.eval()
-        with torch.no_grad():
-            teacher_outs = self.teacher_model(x)
-            teacher_feats = torch.cat((teacher_outs['rc_feats'], teacher_outs['rc_feats']), dim=0)
-
-        loss = self.args.rc_weight * F.mse_loss(teacher_feats, feats)
-
-        return loss
 
 
     def _do_epoch(self, epoch=None):
@@ -227,25 +206,16 @@ class Trainer:
             self.optimizer.zero_grad()
             self.model.zero_grad()
 
-            # concat and get loss one shot
-            #
-            #
             x = torch.cat((x,x_adv))
-            
             y = torch.cat((y, y))
             
             # predict using classification model on original image and get loss
             
-            output = model(x, y, not self.args.norsc, epoch)
-            score_x = output['logits']
-            rc_feats = output['rc_feats']
-            
-            loss_class = criterion(score_x,y)
-            #
-            loss_con_style = self.style_consistency(score_x)
-            loss_con_retro = self.retrospective_consistency(data, rc_feats)
+            score_x = model(x, y, not self.args.norsc, epoch)['logits']
+            loss = criterion(score_x,y)
 
-            loss = loss_class + loss_con_style + loss_con_retro
+            
+
             # Train the classification model
             #self.optimizer.zero_grad()
             loss.backward()

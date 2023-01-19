@@ -41,7 +41,7 @@ def get_args():
                         help="If set, it will limit the number of testing samples")
     parser.add_argument("--learning_rate", "-l", type=float, default=.01, help="Learning rate")
     parser.add_argument("--adv_lr", type=float, default=3.0, help="Learning rate for advstyle")
-    parser.add_argument("--epochs", "-e", type=int, default=25, help="Number of epochs")
+    parser.add_argument("--epochs", "-e", type=int, default=20, help="Number of epochs")
     parser.add_argument("--n_classes", "-c", type=int, default=7, help="Number of classes")
     parser.add_argument("--network", choices=model_factory.nets_map.keys(), help="Which network to use", default="resnet18")
     parser.add_argument("--tf_logger", type=bool, default=True, help="If true will save tensorboard compatible logs")
@@ -56,7 +56,7 @@ def get_args():
     parser.add_argument("--nesterov", action='store_true', default=False, help="Use nesterov")
     parser.add_argument('--norsc', action='store_true', default=False,
                         help='Do not use RSC, i.e., use EMR')
-    parser.add_argument('--seed', type=int, default=1,
+    parser.add_argument('--seed', type=int, default=0,
                         help='model seed')
     parser.add_argument('--print_freq', type=int, default=100,
                         help='print frequency')
@@ -227,25 +227,33 @@ class Trainer:
             self.optimizer.zero_grad()
             self.model.zero_grad()
 
+            #seperate loss
+            out1 = model(x, y, not self.args.norsc, epoch)
+            score_x = out1['logits']
+            loss_x = criterion(score_x,y)
+
+            # predict using classification model on adversial image and get loss
+            out2 = model(x_adv, y, not self.args.norsc, epoch)
+            score_x_adv = out2['logits']
+            loss_x_adv = criterion(score_x_adv,y)
+
+                
             # concat and get loss one shot
             #
             #
-            x = torch.cat((x,x_adv))
-            
-            y = torch.cat((y, y))
+            score_x = torch.cat((score_x,score_x_adv))
+            rc_feats = torch.cat((out1['rc_feats'],out2['rc_feats']))
+
             
             # predict using classification model on original image and get loss
             
-            output = model(x, y, not self.args.norsc, epoch)
-            score_x = output['logits']
-            rc_feats = output['rc_feats']
             
-            loss_class = criterion(score_x,y)
+            #loss_class = criterion(score_x,y)
             #
             loss_con_style = self.style_consistency(score_x)
             loss_con_retro = self.retrospective_consistency(data, rc_feats)
 
-            loss = loss_class + loss_con_style + loss_con_retro
+            loss = loss_x + loss_x_adv + loss_con_style + loss_con_style
             # Train the classification model
             #self.optimizer.zero_grad()
             loss.backward()

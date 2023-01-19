@@ -1,0 +1,10 @@
+- train_adv.py : Train an normal adversial classification model
+
+- train_adv_sep_loss : when computing the final prediction loss, pass through the original image and the adversial image
+seperately through the model and add the loss. This generates a higher loss value than the version in train_adv.py each time, causing model to
+somehow perform better when training with "PHOTO" type of images.
+
+- train_shade.py : Train an adversial classification model, now adding in rc and sc loss
+
+- train_shade_sep_loss.py : Train an adversial classification model, adding in rc and sc loss, pass through two image through model seperately,
+this time it does not seem to produce a better performance.
